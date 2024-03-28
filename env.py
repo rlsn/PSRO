@@ -153,7 +153,7 @@ class RPSEnv(gym.Env):
             self._opponent_action = self.action_space.sample()
         
         d=self._agent_action-self._opponent_action
-        bonus = 1
+        bonus = 2
         if d%3==1:
             self._game_state = 1
             reward = 1
@@ -219,7 +219,10 @@ class YunEnv(gym.Env):
         return (observation//n, observation%n)
 
     def available_actions(self, observation):
-        return self.rule.available_actions(*YunEnv.convert_states(observation, self.rule))
+        if observation<self.N**2:
+            return self.rule.available_actions(*YunEnv.convert_states(observation, self.rule))
+        else:
+            return np.ones(self.action_space.n)
 
     def _get_obs(self):
         # agent's observation as a int
@@ -334,7 +337,18 @@ def test():
         if terminated or truncated:
             break
 
-    print("pass")
+    R = 0
+    N = 5000
+    for i in range(5000):
+        observation, info = env.reset(seed=None, opponent=agent)
+        for t in range(20):
+            action = agent.step(observation, Amask=env.available_actions(observation))
+            observation, reward, terminated, truncated, info = env.step(action)
+            if terminated or truncated:
+                R+=reward
+                break
+    
+    print(f"pass, symmetry={R/N} +- {1/np.sqrt(N)}")
 
 if __name__=="__main__":
     test()

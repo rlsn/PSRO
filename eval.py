@@ -8,6 +8,7 @@ import numpy as np
 from env import YunEnv
 from agent import Agent, softmax_sampling_policy, proportional_policy, threshed_uniform_policy
 import argparse, time, itertools
+from scipy.linalg import schur
 
 def thresh(method):
     match method:
@@ -44,13 +45,14 @@ if __name__=="__main__":
     env = YunEnv()
 
     model = np.load(args.model_file,allow_pickle=True).item()
-    Q,Pi = model.get('Q'),model.get('PI')
-    print("model loaded from {}, size {}".format(args.model_file, Q.shape))
+    nash = model.get('nash')[0]
+    Pi = model.get('pi')[0]
+    print("model loaded from {}, size {}".format(args.model_file, Pi.shape))
 
     if args.run:
-        P1 = Agent(Pi[0], name='p1')
+        P1 = Agent(nash, name='p1')
 
-        P2 = Agent(Pi[1], name='p2')
+        P2 = Agent(nash, name='p2')
         
         observation, info = env.reset(seed=None, opponent=P2, train=args.r)
         print("Example match:")
@@ -66,54 +68,43 @@ if __name__=="__main__":
         # some analysis at particular states
         Na = env.action_space.n
         grid_size = args.s
-        bank_size = 5
+        avg_size = 5
         action_labels = ["C","A1","A2","A3","D1","D2","D3"]
 
         # state-action value grid
         fig, axs = plt.subplots(grid_size,grid_size,figsize=(10,10))
-        fig.suptitle("Bank state-action value (box) & best response @ appox. Nash Equilibrium")
+        fig.suptitle("Behavioral Strategy @ appox. Nash Equilibrium")
         for S1 in range(grid_size):
             for S2 in range(grid_size):
                 S = S1 * (env.rule.n_max_energy+1) + S2
-                axs[S1,S2].boxplot(Q[:bank_size,S])
-                axs[S1,S2].text(4, 0, f"({S1},{S2})",
+                mean = model.get('nash')[:avg_size,S].mean(0)
+                std = model.get('nash')[:avg_size,S].std(0)
+                axs[S1,S2].bar(np.arange(Na)+1,mean, yerr=std, alpha=0.5)
+                axs[S1,S2].text(4, 0.5, f"({S1},{S2})",
                             ha="center", va="center", color="black", alpha=0.15, fontsize=20, weight='bold')
-                axs[S1,S2].set_xticks(np.arange(Q.shape[-1])+1,action_labels)
-                axs[S1,S2].set_ylim(-1.05, 1.05) 
+                axs[S1,S2].set_xticks(np.arange(nash.shape[-1])+1,action_labels)
+                axs[S1,S2].set_ylim(0, 1) 
                 axs[S1,S2].grid()
-
-                ax2 = axs[S1,S2].twinx()
-                p=Pi[:bank_size,S]/Pi[:bank_size,S].sum(-1,keepdims=True)
-                ax2.bar(np.arange(Na)+1,p.mean(0),yerr=p.std(0), color='tab:blue',label="sm",alpha=0.25)
                 
-                ax2.set_ylim(0, 1)
                 if S1==grid_size-1:
                     axs[S1,S2].set_xlabel("A")
                 else:
                     axs[S1,S2].xaxis.set_ticklabels([])
                 if S2==0:
-                    axs[S1,S2].set_ylabel("Q(S,A)")
-                    ax2.yaxis.set_ticklabels([])
-                elif S2==grid_size-1:
-                    ax2.tick_params(axis='y', labelcolor='tab:blue')
-                    ax2.set_ylabel("Prob", color='tab:blue')
-                    axs[S1,S2].yaxis.set_ticklabels([])
+                    axs[S1,S2].set_ylabel("pi(a|s)")
                 else:
                     axs[S1,S2].yaxis.set_ticklabels([])
-                    ax2.yaxis.set_ticklabels([])
 
         fig.tight_layout()
         plt.show()
 
     if args.tour:
-        T = args.T
         num_matches_per_pair = 200
         max_steps = 30
-        num_models = 20
+        num_models = 50
         random_start = args.r
-
-        pi = Pih[::Pih.shape[0]//num_models][::-1]
-
+        Pi_all = model.get('pi').reshape(-1,Pi.shape[1],Pi.shape[2])
+        pi = Pi_all[:num_models]
         NP = pi.shape[0]
         R = np.zeros([NP,NP])
         ns = env.rule.n_max_energy + 1
@@ -133,13 +124,13 @@ if __name__=="__main__":
                 Lk = []
                 for k in range(num_matches_per_pair):
                     
-                    P1 = Agent(pi[i], T=T, mode='prob')
-                    P2 = Agent(pi[j], T=T, mode='prob')
+                    P1 = Agent(pi[i], mode='prob')
+                    P2 = Agent(pi[j], mode='prob')
 
                     observation, info = env.reset(opponent=P2, train=random_start)
                     Lt = [info]
                     for t in range(max_steps):
-                        action = P1.step(observation, env.action_space.n)
+                        action = P1.step(observation, Amask=env.available_actions(observation))
                         observation, reward, terminated, truncated, info = env.step(action)
                         Lt.append(info)
                         state_freq[observation]+=1
@@ -158,18 +149,30 @@ if __name__=="__main__":
             # logs.append(Lj)
         R/=num_matches_per_pair
         tot=R.sum(1,keepdims=True)/NP
-        R = np.concatenate([R,tot],1)
+
+        # schur decomp
+        fig, ax = plt.subplots(figsize=(6,6))
+        T, Z = schur(R, output='complex')
+        cm = plt.get_cmap("RdBu_r")
+        ax.set_title("First 2 components by Schur decomposition")
+        col = (tot.max()-tot)/(tot.max()-tot.min())
+        ax.scatter(Z.real[:,0],Z.real[:,1],marker='o',c=cm([int(c*255) for c in col]))
+        fig.tight_layout()
+
+        # evaluation matrix
+        # R = np.concatenate([R,tot],1)
         fig, ax = plt.subplots(figsize=(8,8))
         im = ax.imshow(-R, cmap = "RdBu_r")
-        ax.set_title("Tounament result")
-        ax.set_xticks(np.arange(NP+1),list(range(NP))+["Total"])
-        ax.set_xlabel("P2 (Generation)")
-        ax.set_yticks(np.arange(NP),np.arange(NP))
-        ax.set_ylabel("P1 (Generation)")
-        for i in range(NP):
-            for j in range(NP+1):
-                text = ax.text(j, i, round(R[i, j],2),
-                            ha="center", va="center", color="w")
+        ax.set_title("Evaluation matrix")
+        # ax.set_xticks(np.arange(NP+1),list(range(NP))+["Total"])
+        # ax.set_xlabel("P2")
+        # ax.set_yticks(np.arange(NP),np.arange(NP))
+        # ax.set_ylabel("P1")
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
+        # for i in range(NP):
+        #     for j in range(NP+1):
+        #         text = ax.text(j, i, round(R[i, j],2),ha="center", va="center", color="w")
         fig.tight_layout()
 
         # state visit
@@ -207,7 +210,7 @@ if __name__=="__main__":
         fig.tight_layout()
 
         # V(s)
-        state_value = np.array([np.average(r) for r in state_value])
+        state_value = np.array([np.mean(r) if len(r)>0 else 0 for r in state_value])
         state_value = state_value[:ns**2]
         state_value = state_value.reshape(ns,ns)
         fig, ax = plt.subplots(figsize=(6,6))
@@ -223,6 +226,7 @@ if __name__=="__main__":
                             ha="center", va="center", color="w")
         fig.tight_layout()
 
+
         # stats
         print("total match finished: {}".format(env.rule.num_matches))
         print("violation end: {}".format(env.rule.violation))
@@ -234,10 +238,9 @@ if __name__=="__main__":
 
     if args.selfplay:
         N = args.tsize
-        print(f"running selfplay {int(N)} times")
-        print(f"best response vs sampling methods: {args.sampling_method}")
-        P1 = Agent(Pi[0], T=args.T, mode='prob')
-        P2 = Agent(Qh[0], T=args.T, mode=args.sampling_method, thresh=thresh(args.sampling_method))
+        print(f"running selfplay (nash vs agent 0) {int(N)} times")
+        P1 = Agent(nash, mode='prob')
+        P2 = Agent(Pi[0], mode='prob')
         rewards = []
         length = []
         ns = env.rule.n_max_energy + 1
