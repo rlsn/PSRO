@@ -8,7 +8,7 @@ from gymnasium import spaces
 
 class RPSEnv(gym.Env):
     # toy env for testing sanity of the algorithm
-    def __init__(self, max_episode_steps=100, **kargs):
+    def __init__(self, max_episode_steps=1, **kargs):
         self.opponent = None
         self.train = False
         # Observation is a Cartesian space of the agent's and the opponent's energy,

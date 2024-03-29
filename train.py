@@ -54,7 +54,7 @@ def gamescape(env, pi, Ne):
             R[i,j] = estimate_reward(env,Ne,Agent(pi[i]),Agent(pi[j]))
     return R
 
-def PSROrN(env, num_iters=1000, num_steps_per_iter = 10000, eps=0.1, alpha=0.1, save_interval=1, num_policies=20, evaluation_episodes=500):
+def PSROrN(env, num_iters=1000, num_steps_per_iter = 10000, eps=0.1, alpha=0.1, save_interval=1, num_policies=20, evaluation_episodes=10):
     nash=[]
     Pih = []
     Rh = []
@@ -99,7 +99,10 @@ def PSROrN(env, num_iters=1000, num_steps_per_iter = 10000, eps=0.1, alpha=0.1, 
 
             # update avg strategy towards beta
             eta = max(0.5/niter,0.001)
-            new_pi[agent_id] = pi[agent_id] + eta*(beta-pi[agent_id])
+            # new_pi[agent_id] = pi[agent_id] + eta*(beta-pi[agent_id])
+
+            # or replace pi with beta
+            new_pi[agent_id] = beta
 
         # update pi
         pi = np.copy(new_pi)
@@ -163,12 +166,12 @@ if __name__=="__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, help="set seed", default=None)
     parser.add_argument('--model_file', type=str, help="filename of the model to be saved", default="Qh.npy")
-    parser.add_argument('--num_iters', type=int, help="number of total training iterations", default=30)
-    parser.add_argument('--num_steps_per_iter', type=int, help="number of training steps for each iteration", default=20000)
+    parser.add_argument('--num_iters', type=int, help="number of total training iterations", default=5)
+    parser.add_argument('--num_steps_per_iter', type=int, help="number of training steps for each iteration", default=100)
 
     parser.add_argument('--step_size', type=int, help="learning rate alpha", default=0.1)
     parser.add_argument('--eps', type=float, help="hyperparameter epsilon for epsilon greedy policy", default=0.1)
-    parser.add_argument('--num_policies', type=int, help="number of policies for PSRO", default=30)
+    parser.add_argument('--num_policies', type=int, help="number of policies for PSRO", default=10)
 
     args = parser.parse_args()
     
