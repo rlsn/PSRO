@@ -22,6 +22,7 @@ class RPSEnv(gym.Env):
         self.action_space = spaces.Discrete(3)
 
         self.max_episode_steps = max_episode_steps
+        self.action_matrix = np.array([self.available_actions(s) for s in range(self.observation_space.n)])
 
     def _get_info(self):
         return {
